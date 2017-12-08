@@ -6,7 +6,10 @@
     pvrartwork.py
     Get metadata for Kodi PVR programs
 '''
+import json
+import urllib
 
+import requests
 from utils import get_clean_image, DialogSelect, log_msg, extend_dict, ADDON_ID, download_artwork, normalize_string
 import xbmc
 import xbmcgui
@@ -112,79 +115,91 @@ class PvrArtwork(object):
                     log_msg(
                         "pvrart start scraping metadata for title: %s - media_type: %s" %
                         (searchtitle, details["media_type"]))
+                    if self.check_choice(searchtitle) or self.check_hgtv(searchtitle) or self.check_three(searchtitle) or self.check_tvnz(searchtitle):
+                        # use new zealand specific scrapers, if a match is found
+                        # Scaper priority: TVNZ, Three, Choice, HGTV
+                        if self.check_tvnz(searchtitle):
+                            xbmc.log("TVNZ Match Found " + searchtitle, level=xbmc.LOGNOTICE)
+                        elif self.check_three(searchtitle):
+                            xbmc.log("Three Match Found " + searchtitle, level=xbmc.LOGINFO)
+                        elif self.check_choice(searchtitle):
+                            xbmc.log("ChoiceTV Match Found " + searchtitle, level=xbmc.LOGINFO)
+                        elif self.check_hgtv(searchtitle):
+                            xbmc.log("HGTV Match Found " + searchtitle, level=xbmc.LOGINFO)
+                    else:
+                        xbmc.log("No New Zealand Match Found " + searchtitle, level=xbmc.LOGINFO)
+                        # prefer tmdb scraper
+                        tmdb_result = self._mutils.get_tmdb_details(
+                            "", "", searchtitle, "", "", details["media_type"],
+                                manual_select=manual_select, ignore_cache=manual_select)
+                        log_msg("pvrart lookup for title: %s - TMDB result: %s" % (searchtitle, tmdb_result))
+                        if tmdb_result:
+                            details["media_type"] = tmdb_result["media_type"]
+                            details = extend_dict(details, tmdb_result)
 
-                    # prefer tmdb scraper
-                    tmdb_result = self._mutils.get_tmdb_details(
-                        "", "", searchtitle, "", "", details["media_type"],
-                            manual_select=manual_select, ignore_cache=manual_select)
-                    log_msg("pvrart lookup for title: %s - TMDB result: %s" % (searchtitle, tmdb_result))
-                    if tmdb_result:
-                        details["media_type"] = tmdb_result["media_type"]
-                        details = extend_dict(details, tmdb_result)
+                        # fallback to tvdb scraper
+                        if (not tmdb_result or (tmdb_result and not tmdb_result.get("art")) or
+                                details["media_type"] == "tvshow"):
+                            tvdb_match = self.lookup_tvdb(searchtitle, channel, manual_select=manual_select)
+                            log_msg("pvrart lookup for title: %s - TVDB result: %s" % (searchtitle, tvdb_match))
+                            if tvdb_match:
+                                # get full tvdb results and extend with tmdb
+                                if not details["media_type"]:
+                                    details["media_type"] = "tvshow"
+                                details = extend_dict(details, self._mutils.thetvdb.get_series(tvdb_match))
+                                details = extend_dict(details, self._mutils.tmdb.get_videodetails_by_externalid(
+                                    tvdb_match, "tvdb_id"), ["poster", "fanart"])
 
-                    # fallback to tvdb scraper
-                    if (not tmdb_result or (tmdb_result and not tmdb_result.get("art")) or
-                            details["media_type"] == "tvshow"):
-                        tvdb_match = self.lookup_tvdb(searchtitle, channel, manual_select=manual_select)
-                        log_msg("pvrart lookup for title: %s - TVDB result: %s" % (searchtitle, tvdb_match))
-                        if tvdb_match:
-                            # get full tvdb results and extend with tmdb
-                            if not details["media_type"]:
-                                details["media_type"] = "tvshow"
-                            details = extend_dict(details, self._mutils.thetvdb.get_series(tvdb_match))
-                            details = extend_dict(details, self._mutils.tmdb.get_videodetails_by_externalid(
-                                tvdb_match, "tvdb_id"), ["poster", "fanart"])
+                        # fanart.tv scraping - append result to existing art
+                        if details.get("imdbnumber") and details["media_type"] == "movie":
+                            details["art"] = extend_dict(
+                                details["art"], self._mutils.fanarttv.movie(
+                                    details["imdbnumber"]), [
+                                    "poster", "fanart", "landscape"])
+                        elif details.get("tvdb_id") and details["media_type"] == "tvshow":
+                            details["art"] = extend_dict(
+                                details["art"], self._mutils.fanarttv.tvshow(
+                                    details["tvdb_id"]), [
+                                    "poster", "fanart", "landscape"])
 
-                    # fanart.tv scraping - append result to existing art
-                    if details.get("imdbnumber") and details["media_type"] == "movie":
-                        details["art"] = extend_dict(
-                            details["art"], self._mutils.fanarttv.movie(
-                                details["imdbnumber"]), [
-                                "poster", "fanart", "landscape"])
-                    elif details.get("tvdb_id") and details["media_type"] == "tvshow":
-                        details["art"] = extend_dict(
-                            details["art"], self._mutils.fanarttv.tvshow(
-                                details["tvdb_id"]), [
-                                "poster", "fanart", "landscape"])
+                        # append omdb details
+                        if details.get("imdbnumber"):
+                            details = extend_dict(
+                                details, self._mutils.omdb.get_details_by_imdbid(
+                                    details["imdbnumber"]), [
+                                    "rating", "votes"])
 
-                    # append omdb details
-                    if details.get("imdbnumber"):
-                        details = extend_dict(
-                            details, self._mutils.omdb.get_details_by_imdbid(
-                                details["imdbnumber"]), [
-                                "rating", "votes"])
+                        # set thumbnail - prefer scrapers
+                        thumb = ""
+                        if details.get("thumbnail"):
+                            thumb = details["thumbnail"]
+                        elif details["art"].get("landscape"):
+                            thumb = details["art"]["landscape"]
+                        elif details["art"].get("fanart"):
+                            thumb = details["art"]["fanart"]
+                        elif details["art"].get("poster"):
+                            thumb = details["art"]["poster"]
+                        # use google images as last-resort fallback for thumbs - if enabled
+                        elif self._mutils.addon.getSetting("pvr_art_google") == "true":
+                            if manual_select:
+                                google_title = searchtitle
+                            else:
+                                google_title = '%s %s' % (searchtitle, channel.lower().split(" hd")[0])
+                            thumb = self._mutils.google.search_image(google_title, manual_select)
+                        if thumb:
+                            details["thumbnail"] = thumb
+                            details["art"]["thumb"] = thumb
+                        # extrafanart
+                        if details["art"].get("fanarts"):
+                            for count, item in enumerate(details["art"]["fanarts"]):
+                                details["art"]["fanart.%s" % count] = item
+                            if not details["art"].get("extrafanart") and len(details["art"]["fanarts"]) > 1:
+                                details["art"]["extrafanart"] = "plugin://script.skin.helper.service/"\
+                                    "?action=extrafanart&fanarts=%s" % quote_plus(repr(details["art"]["fanarts"]))
 
-                    # set thumbnail - prefer scrapers
-                    thumb = ""
-                    if details.get("thumbnail"):
-                        thumb = details["thumbnail"]
-                    elif details["art"].get("landscape"):
-                        thumb = details["art"]["landscape"]
-                    elif details["art"].get("fanart"):
-                        thumb = details["art"]["fanart"]
-                    elif details["art"].get("poster"):
-                        thumb = details["art"]["poster"]
-                    # use google images as last-resort fallback for thumbs - if enabled
-                    elif self._mutils.addon.getSetting("pvr_art_google") == "true":
-                        if manual_select:
-                            google_title = searchtitle
-                        else:
-                            google_title = '%s %s' % (searchtitle, channel.lower().split(" hd")[0])
-                        thumb = self._mutils.google.search_image(google_title, manual_select)
-                    if thumb:
-                        details["thumbnail"] = thumb
-                        details["art"]["thumb"] = thumb
-                    # extrafanart
-                    if details["art"].get("fanarts"):
-                        for count, item in enumerate(details["art"]["fanarts"]):
-                            details["art"]["fanart.%s" % count] = item
-                        if not details["art"].get("extrafanart") and len(details["art"]["fanarts"]) > 1:
-                            details["art"]["extrafanart"] = "plugin://script.skin.helper.service/"\
-                                "?action=extrafanart&fanarts=%s" % quote_plus(repr(details["art"]["fanarts"]))
-
-                    # download artwork to custom folder
-                    if self._mutils.addon.getSetting("pvr_art_download") == "true":
-                        details["art"] = download_artwork(self.get_custom_path(searchtitle, title), details["art"])
+                        # download artwork to custom folder
+                        if self._mutils.addon.getSetting("pvr_art_download") == "true":
+                            details["art"] = download_artwork(self.get_custom_path(searchtitle, title), details["art"])
 
             log_msg("pvrart lookup for title: %s - final result: %s" % (searchtitle, details))
 
@@ -411,6 +426,166 @@ class PvrArtwork(object):
                     listing=listitems,
                     window_title="%s - TVDB" %
                     xbmc.getLocalizedString(283))
+                dialog.doModal()
+                selected_item = dialog.result
+                del dialog
+                if selected_item != -1:
+                    tvdb_match = match_results[selected_item]["id"]
+                else:
+                    match_results = []
+            if not tvdb_match and match_results:
+                # just grab the first item as best match
+                tvdb_match = match_results[0]["id"]
+        return tvdb_match
+
+    def check_tvnz(self, searchtitle):
+        searchtitle = str(searchtitle)
+
+        data = []
+        url = "https://api.tvnz.co.nz/api/content/tvnz/ondemand/shows/search/" + urllib.urlencode(searchtitle.replace("All New",
+                                                                                                     "")) + ".androidtablet.v8.json"
+        headers = {'Content-Type': 'application/json',
+                   'Accept': 'application/json',
+                   'User-agent': 'Mozilla/5.0'}
+
+        try:
+            response = requests.get(url, headers=headers, timeout=20)
+            if response and response.content and response.status_code == 200:
+                data = json.loads(response.content.decode('utf-8', 'replace'))
+
+        except Exception as exc:
+            xbmc.log("Exception in get_data --> %s" % repr(exc), xbmc.LOGERROR)
+
+        return len(data) == 0
+
+    def check_three(self, searchtitle):
+        searchtitle = str(searchtitle)
+
+        data = []
+        url = "https://now-api.mediaworks.nz/now-api/v3/shows"
+        headers = {'Content-Type': 'application/json',
+                   'Accept': 'application/json',
+                   'User-agent': 'Mozilla/5.0'}
+
+        try:
+            response = requests.get(url, headers=headers, timeout=20)
+            if response and response.content and response.status_code == 200:
+                data = json.loads(response.content.decode('utf-8', 'replace'))
+
+        except Exception as exc:
+            xbmc.log("Exception in get_data --> %s" % repr(exc), xbmc.LOGERROR)
+
+        return any(d['name'] == searchtitle for d in data['shows'])
+
+    def check_choice(self, searchtitle):
+        searchtitle = str(searchtitle)
+
+        data = []
+        url = "https://www.choicetv.co.nz/services/meta/v1/search/?page=1&query=" + urllib.urlencode(
+            searchtitle.replace("All New",
+                                ""))
+        headers = {'Content-Type': 'application/json',
+                   'Accept': 'application/json',
+                   'User-agent': 'Mozilla/5.0'}
+
+        try:
+            response = requests.get(url, headers=headers, timeout=20)
+            if response and response.content and response.status_code == 200:
+                data = json.loads(response.content.decode('utf-8', 'replace'))
+
+        except Exception as exc:
+            xbmc.log("Exception in get_data --> %s" % repr(exc), xbmc.LOGERROR)
+
+        return len(data) == 0
+
+    def check_hgtv(self, searchtitle):
+        searchtitle = str(searchtitle)
+
+        data = []
+        url = "https://www.hgtv.co.nz/services/meta/v1/search/?page=1&query=" + urllib.urlencode(
+            searchtitle.replace("All New",
+                                ""))
+        headers = {'Content-Type': 'application/json',
+                   'Accept': 'application/json',
+                   'User-agent': 'Mozilla/5.0'}
+
+        try:
+            response = requests.get(url, headers=headers, timeout=20)
+            if response and response.content and response.status_code == 200:
+                data = json.loads(response.content.decode('utf-8', 'replace'))
+
+        except Exception as exc:
+            xbmc.log("Exception in get_data --> %s" % repr(exc), xbmc.LOGERROR)
+
+        return len(data) == 0
+
+    def lookup_tvnz(self, searchtitle, manual_select=False):
+        '''helper to select a match on tvnz'''
+
+        searchtitle = str(searchtitle)
+
+        data = []
+        url = "https://api.tvnz.co.nz/api/content/tvnz/ondemand/shows/search/" + searchtitle.replace("All New", "") + ".androidtablet.v8.json"
+        headers = {'Content-Type': 'application/json',
+                   'Accept': 'application/json',
+                   'User-agent': 'Mozilla/5.0'}
+
+        try:
+            response = requests.get(url, headers=headers, timeout=20)
+            if response and response.content and response.status_code == 200:
+                data = json.loads(response.content.decode('utf-8', 'replace'))
+
+        except Exception as exc:
+            xbmc.log("Exception in get_data --> %s" % repr(exc), xbmc.LOGERROR)
+
+        tvdb_match = None
+        searchtitle = searchtitle.lower()
+        tvdb_result = self._mutils.thetvdb.search_series(searchtitle, True)
+        searchchannel = channel.lower().split("hd")[0].replace(" ", "")
+        match_results = []
+        if tvdb_result:
+            for item in tvdb_result:
+                item["score"] = 0
+                if not item["seriesName"]:
+                    continue  # seriesname can be None in some conditions
+                itemtitle = item["seriesName"].lower()
+                network = item["network"].lower().replace(" ", "")
+                # high score if channel name matches
+                if network in searchchannel or searchchannel in network:
+                    item["score"] += 800
+                # exact match on title - very high score
+                if searchtitle == itemtitle:
+                    item["score"] += 1000
+                # match title by replacing some characters
+                if re.sub('\*|,|.\"|\'| |:|;', '', searchtitle) == re.sub('\*|,|.\"|\'| |:|;', '', itemtitle):
+                    item["score"] += 750
+                # add SequenceMatcher score to the results
+                stringmatchscore = SM(None, searchtitle, itemtitle).ratio()
+                if stringmatchscore > 0.7:
+                    item["score"] += stringmatchscore * 500
+                # prefer items with native language as we've searched with localized info enabled
+                if item["overview"]:
+                    item["score"] += 250
+                # prefer items with artwork
+                if item["banner"]:
+                    item["score"] += 1
+                if item["score"] > 500 or manual_select:
+                    match_results.append(item)
+            # sort our new list by score
+            match_results = sorted(match_results, key=itemgetter("score"), reverse=True)
+            if match_results and manual_select:
+                # show selectdialog to manually select the item
+                listitems = []
+                for item in match_results:
+                    thumb = "http://thetvdb.com/banners/%s" % item["banner"] if item["banner"] else ""
+                    listitem = xbmcgui.ListItem(label=item["seriesName"], iconImage=thumb, label2=item["overview"])
+                    listitems.append(listitem)
+                dialog = DialogSelect(
+                    "DialogSelect.xml",
+                    "",
+                    listing=listitems,
+                    window_title="%s - TVDB" %
+                                 xbmc.getLocalizedString(283))
                 dialog.doModal()
                 selected_item = dialog.result
                 del dialog
