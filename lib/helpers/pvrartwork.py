@@ -111,6 +111,7 @@ class PvrArtwork(object):
 
                 # do internet scraping if enabled
                 if self._mutils.addon.getSetting("pvr_art_scraper") == "true":
+                    searchtitle = searchtitle.replace("q+a", "q and a")
 
                     log_msg(
                         "pvrart start scraping metadata for title: %s - media_type: %s" %
@@ -126,15 +127,21 @@ class PvrArtwork(object):
                         details['art']['fanart'] = "https://i.imgur.com/kjmUHBM.png"
                         details['art']['fanart'] = "https://i.imgur.com/kjmUHBM.png"
                         log_msg("The Edge TV Match Found")
+                    elif channel == "Māori Television".lower():
+                        # also use generic art for the edge tv
+                        details['art']['fanart'] = "https://i.imgur.com/5O3x9W0.png"
+                        details['art']['fanart'] = "https://i.imgur.com/5O3x9W0.png"
+                        log_msg("MTV Match Found")
                     elif channel == "RNZ National".lower():
                         # also use generic art for the edge tv
                         details['art']['fanart'] = "https://i.imgur.com/ELUzegU.png"
                         details['art']['fanart'] = "https://i.imgur.com/ELUzegU.png"
-                        log_msg("The Edge TV Match Found")
-                    elif channel == "TVNZ 1".lower() or channel == "TVNZ 2".lower() or channel == "TVNZ Duke".lower() or channel == "TVNZ 1+1".lower() or channel == "TVNZ 2+1".lower() and self.check_tvnz(searchtitle):
-                        # use new zealand specific scrapers, if a match is found
-                        log_msg("TVNZ Match Found " + searchtitle)
-                        details['art'] = self.lookup_tvnz(searchtitle)
+                        log_msg("RNZ Match Found")
+                    elif channel == "TVNZ 1".lower() or channel == "TVNZ 2".lower() or channel == "TVNZ Duke".lower() or channel == "TVNZ 1+1".lower() or channel == "TVNZ 2+1".lower():
+                        if self.check_tvnz(searchtitle) is not False:
+                            # use new zealand specific scrapers, if a match is found
+                            log_msg("TVNZ Match Found " + searchtitle)
+                            details['art'] = self.lookup_tvnz(searchtitle)
 
                     elif channel == "Three".lower() or channel == "Bravo".lower() or channel == "ThreePlus1".lower() or channel == "Bravo PLUS 1".lower():
                         if self.lookup_three(searchtitle) is not None:
@@ -496,6 +503,9 @@ class PvrArtwork(object):
     def check_tvnz(self, searchtitle):
         searchtitle = str(searchtitle)
 
+        # Fix Q+A specific bug
+        searchtitle = searchtitle.replace("q+a", "q and a")
+
         data = []
         url = "https://api.tvnz.co.nz/api/content/tvnz/ondemand/shows/search/" + urllib.quote(searchtitle.replace("all new",
                                                                                                      "")) + ".androidtablet.v8.json"
@@ -516,6 +526,9 @@ class PvrArtwork(object):
 
     def lookup_tvnz(self, searchtitle):
         searchtitle = str(searchtitle)
+
+        # Fix Q+A specific bug
+        searchtitle = searchtitle.replace("q+a", "q and a")
 
         res = []
         url = "https://api.tvnz.co.nz/api/content/tvnz/ondemand/shows/search/" + urllib.quote(searchtitle.replace("all new",
