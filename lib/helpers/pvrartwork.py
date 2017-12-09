@@ -115,19 +115,42 @@ class PvrArtwork(object):
                     log_msg(
                         "pvrart start scraping metadata for title: %s - media_type: %s" %
                         (searchtitle, details["media_type"]))
-                    if self.check_choice(searchtitle) or self.check_hgtv(searchtitle) or self.check_three(searchtitle) or self.check_tvnz(searchtitle):
+                    channel = channel.lower()
+                    if channel == "Parliament TV".lower():
+                        # use a generic image for parliment TV
+                        details['art']['fanart'] = "https://i.imgur.com/SIBAPFM.png"
+                        details['art']['thumb'] = "https://i.imgur.com/SIBAPFM.png"
+                        log_msg("Parliament TV Match Found")
+                    elif channel == "The Edge TV".lower():
+                        # also use generic art for the edge tv
+                        details['art']['fanart'] = "https://i.imgur.com/kjmUHBM.png"
+                        details['art']['fanart'] = "https://i.imgur.com/kjmUHBM.png"
+                        log_msg("The Edge TV Match Found")
+                    elif channel == "RNZ National".lower():
+                        # also use generic art for the edge tv
+                        details['art']['fanart'] = "https://i.imgur.com/ELUzegU.png"
+                        details['art']['fanart'] = "https://i.imgur.com/ELUzegU.png"
+                        log_msg("The Edge TV Match Found")
+                    elif channel == "TVNZ 1".lower() or channel == "TVNZ 2".lower() or channel == "TVNZ Duke".lower() or channel == "TVNZ 1+1".lower() or channel == "TVNZ 2+1".lower() and self.check_tvnz(searchtitle):
                         # use new zealand specific scrapers, if a match is found
-                        # Scaper priority: TVNZ, Three, Choice, HGTV
-                        if self.check_tvnz(searchtitle):
-                            xbmc.log("TVNZ Match Found " + searchtitle, level=xbmc.LOGNOTICE)
-                        elif self.check_three(searchtitle):
-                            xbmc.log("Three Match Found " + searchtitle, level=xbmc.LOGINFO)
-                        elif self.check_choice(searchtitle):
-                            xbmc.log("ChoiceTV Match Found " + searchtitle, level=xbmc.LOGINFO)
-                        elif self.check_hgtv(searchtitle):
-                            xbmc.log("HGTV Match Found " + searchtitle, level=xbmc.LOGINFO)
+                        log_msg("TVNZ Match Found " + searchtitle)
+                        details['art'] = self.lookup_tvnz(searchtitle)
+
+                    elif channel == "Three".lower() or channel == "Bravo".lower() or channel == "ThreePlus1".lower() or channel == "Bravo PLUS 1".lower():
+                        if self.lookup_three(searchtitle) is not None:
+                            # use new zealand specific scrapers, if a match is found
+                            log_msg("Three Match Found " + searchtitle)
+                            details['art'] = self.lookup_three(searchtitle)
+                    elif channel == "Choice TV".lower() and self.check_choice(searchtitle):
+                        # use new zealand specific scrapers, if a match is found
+                        log_msg("Choice Match Found " + searchtitle)
+                        details['art'] = self.lookup_choice(searchtitle)
+                    elif channel == "HGTV".lower() and self.check_hgtv(searchtitle):
+                        # use new zealand specific scrapers, if a match is found
+                        log_msg("HGTV Match Found " + searchtitle)
+                        details['art'] = self.lookup_hgtv(searchtitle)
                     else:
-                        xbmc.log("No New Zealand Match Found " + searchtitle, level=xbmc.LOGINFO)
+                        log_msg("No New Zealand Match Found, continuing to generic matchers " + searchtitle)
                         # prefer tmdb scraper
                         tmdb_result = self._mutils.get_tmdb_details(
                             "", "", searchtitle, "", "", details["media_type"],
@@ -169,37 +192,69 @@ class PvrArtwork(object):
                                     details["imdbnumber"]), [
                                     "rating", "votes"])
 
-                        # set thumbnail - prefer scrapers
-                        thumb = ""
-                        if details.get("thumbnail"):
-                            thumb = details["thumbnail"]
-                        elif details["art"].get("landscape"):
-                            thumb = details["art"]["landscape"]
-                        elif details["art"].get("fanart"):
-                            thumb = details["art"]["fanart"]
-                        elif details["art"].get("poster"):
-                            thumb = details["art"]["poster"]
-                        # use google images as last-resort fallback for thumbs - if enabled
-                        elif self._mutils.addon.getSetting("pvr_art_google") == "true":
-                            if manual_select:
-                                google_title = searchtitle
-                            else:
-                                google_title = '%s %s' % (searchtitle, channel.lower().split(" hd")[0])
-                            thumb = self._mutils.google.search_image(google_title, manual_select)
-                        if thumb:
-                            details["thumbnail"] = thumb
-                            details["art"]["thumb"] = thumb
-                        # extrafanart
-                        if details["art"].get("fanarts"):
-                            for count, item in enumerate(details["art"]["fanarts"]):
-                                details["art"]["fanart.%s" % count] = item
-                            if not details["art"].get("extrafanart") and len(details["art"]["fanarts"]) > 1:
-                                details["art"]["extrafanart"] = "plugin://script.skin.helper.service/"\
-                                    "?action=extrafanart&fanarts=%s" % quote_plus(repr(details["art"]["fanarts"]))
+                    # set thumbnail - prefer scrapers
+                    thumb = ""
+                    if details.get("thumbnail"):
+                        thumb = details["thumbnail"]
+                    elif details["art"].get("landscape"):
+                        thumb = details["art"]["landscape"]
+                    elif details["art"].get("fanart"):
+                        thumb = details["art"]["fanart"]
+                    elif details["art"].get("poster"):
+                        thumb = details["art"]["poster"]
+                    # use google images as last-resort fallback for thumbs - if enabled
+                    elif self._mutils.addon.getSetting("pvr_art_google") == "true":
+                        if manual_select:
+                            google_title = searchtitle
+                        else:
+                            google_title = '%s %s' % (searchtitle, channel.lower().split(" hd")[0])
+                        thumb = self._mutils.google.search_image(google_title, manual_select)
 
-                        # download artwork to custom folder
-                        if self._mutils.addon.getSetting("pvr_art_download") == "true":
-                            details["art"] = download_artwork(self.get_custom_path(searchtitle, title), details["art"])
+                    # extrafanart
+                    channel_art = [
+                        {
+                            "channel": "tvnz 1",
+                            "art": "https://raw.githubusercontent.com/thediamondpicks/iptv/master/nz/images/tv.9.png"
+                        },
+                        {
+                            "channel": "tvnz 2",
+                            "art": "https://raw.githubusercontent.com/thediamondpicks/iptv/master/nz/images/tv.10.png"
+                        },
+                        {"channel": "three", "art": "https://raw.githubusercontent.com/thediamondpicks/iptv/master/nz/images/tv.11.png"},
+                        {"channel": "bravo", "art": "https://raw.githubusercontent.com/thediamondpicks/iptv/master/nz/images/tv.12.png"},
+                        {"channel": "māori television", "art": "https://raw.githubusercontent.com/thediamondpicks/iptv/master/nz/images/tv.13.png"},
+                        {"channel": "tvnz 1+1", "art": "https://raw.githubusercontent.com/thediamondpicks/iptv/master/nz/images/tv.38.png"},
+                        {"channel": "tvnz 2+1", "art": "https://raw.githubusercontent.com/thediamondpicks/iptv/master/nz/images/tv.14.png"},
+                        {"channel": "bravo plus 1", "art": "https://raw.githubusercontent.com/thediamondpicks/iptv/master/nz/images/tv.30.png"},
+                        {"channel": "prime", "art": "https://raw.githubusercontent.com/thediamondpicks/iptv/master/nz/images/tv.28.png"},
+                        {"channel": "choice tv", "art": "https://raw.githubusercontent.com/thediamondpicks/iptv/master/nz/images/tv.37.png"},
+                        {"channel": "duke", "art": "https://raw.githubusercontent.com/thediamondpicks/iptv/master/nz/images/tv.55.png"},
+                        {"channel": "te reo", "art": "https://raw.githubusercontent.com/thediamondpicks/iptv/master/nz/images/tv.20.png"},
+                        {"channel": "al jazeera", "art": "https://raw.githubusercontent.com/thediamondpicks/iptv/master/nz/images/tv.46.png"},
+                        {"channel": "hgtv", "art": "https://raw.githubusercontent.com/thediamondpicks/iptv/master/nz/images/tv.58.png"},
+                        {"channel": "southern television", "art": "https://raw.githubusercontent.com/thediamondpicks/iptv/master/nz/images/tv.41.png"},
+                    ]
+                    if not thumb:
+                        for art in channel_art:
+                            if art['channel'] == channel:
+                                thumb = art['art']
+
+                    if thumb:
+                        details["thumbnail"] = thumb
+                        details["art"]["thumb"] = thumb
+
+                    if details["art"].get("fanarts"):
+                        for count, item in enumerate(details["art"]["fanarts"]):
+                            details["art"]["fanart.%s" % count] = item
+                        if not details["art"].get("extrafanart") and len(details["art"]["fanarts"]) > 1:
+                            details["art"]["extrafanart"] = "plugin://script.skin.helper.service/"\
+                                "?action=extrafanart&fanarts=%s" % quote_plus(repr(details["art"]["fanarts"]))
+
+                    # download artwork to custom folder
+                    if self._mutils.addon.getSetting("pvr_art_download") == "true":
+                        details["art"] = download_artwork(self.get_custom_path(searchtitle, title), details["art"])
+
+
 
             log_msg("pvrart lookup for title: %s - final result: %s" % (searchtitle, details))
 
@@ -442,7 +497,7 @@ class PvrArtwork(object):
         searchtitle = str(searchtitle)
 
         data = []
-        url = "https://api.tvnz.co.nz/api/content/tvnz/ondemand/shows/search/" + urllib.urlencode(searchtitle.replace("All New",
+        url = "https://api.tvnz.co.nz/api/content/tvnz/ondemand/shows/search/" + urllib.quote(searchtitle.replace("all new",
                                                                                                      "")) + ".androidtablet.v8.json"
         headers = {'Content-Type': 'application/json',
                    'Accept': 'application/json',
@@ -456,10 +511,78 @@ class PvrArtwork(object):
         except Exception as exc:
             xbmc.log("Exception in get_data --> %s" % repr(exc), xbmc.LOGERROR)
 
-        return len(data) == 0
+        log_msg("tvnz length {}".format(len(data)) + " name: " + urllib.quote(searchtitle))
+        return len(data) != 0
+
+    def lookup_tvnz(self, searchtitle):
+        searchtitle = str(searchtitle)
+
+        res = []
+        url = "https://api.tvnz.co.nz/api/content/tvnz/ondemand/shows/search/" + urllib.quote(searchtitle.replace("all new",
+                                                                                                     "")) + ".androidtablet.v8.json"
+        headers = {'Content-Type': 'application/json',
+                   'Accept': 'application/json',
+                   'User-agent': 'Mozilla/5.0'}
+
+        try:
+            response = requests.get(url, headers=headers, timeout=20)
+            if response and response.content and response.status_code == 200:
+                res = json.loads(response.content.decode('utf-8', 'replace'))
+
+        except Exception as exc:
+            xbmc.log("Exception in get_data --> %s" % repr(exc), xbmc.LOGERROR)
+
+        url = "https://api.tvnz.co.nz/api" + res[0]['path'] + ".androidtablet.v8.json"
+        res = []
+        headers = {'Content-Type': 'application/json',
+                   'Accept': 'application/json',
+                   'User-agent': 'Mozilla/5.0'}
+        try:
+            response = requests.get(url, headers=headers, timeout=20)
+            if response and response.content and response.status_code == 200:
+                res = json.loads(response.content.decode('utf-8', 'replace'))
+
+        except Exception as exc:
+            xbmc.log("Exception in get_data --> %s" % repr(exc), xbmc.LOGERROR)
+        art = {}
+        art['fanart'] = "https://api.tvnz.co.nz" + res[0]['mainItem']['tileImage']
+        art['thumb'] = "https://api.tvnz.co.nz" + res[0]['mainItem']['tileImage']
+        return art
 
     def check_three(self, searchtitle):
         searchtitle = str(searchtitle)
+
+        data = []
+        url = "https://now-api.mediaworks.nz/now-api/v3/shows"
+        headers = {'Content-Type': 'application/json',
+                   'Accept': 'application/json',
+                   'User-agent': 'Mozilla/5.0'}
+
+        searchtitle = searchtitle.replace("all new ", "")
+        # replace Live At, fixes a bug with newshub
+        searchtitle = searchtitle.replace("live at ", "")
+
+        try:
+            response = requests.get(url, headers=headers, timeout=20)
+            if response and response.content and response.status_code == 200:
+                data = json.loads(response.content.decode('utf-8', 'replace'))
+
+        except Exception as exc:
+            xbmc.log("Exception in get_data --> %s" % repr(exc), xbmc.LOGERROR)
+
+        for d in data['shows']:
+            if d['name'].lower() == searchtitle.lower():
+                return True
+        return False
+    def lookup_three(self, searchtitle):
+        searchtitle = str(searchtitle)
+
+        searchtitle = searchtitle.replace("all new ", "")
+        # replace Live At, fixes a bug with newshub
+        searchtitle = searchtitle.replace("live at ", "")
+        test = searchtitle.__contains__("live at")
+
+        log_msg("3 searchtitle debug " + searchtitle + " has {}".format(test))
 
         data = []
         url = "https://now-api.mediaworks.nz/now-api/v3/shows"
@@ -475,14 +598,21 @@ class PvrArtwork(object):
         except Exception as exc:
             xbmc.log("Exception in get_data --> %s" % repr(exc), xbmc.LOGERROR)
 
-        return any(d['name'] == searchtitle for d in data['shows'])
+        for d in data['shows']:
+            if d['name'].lower() == searchtitle.lower():
+                art = {}
+                art['thumb'] = d['images']['showTile']
+                art['fanart'] = d['images']['showTile']
+                return art
+
+
 
     def check_choice(self, searchtitle):
         searchtitle = str(searchtitle)
 
         data = []
-        url = "https://www.choicetv.co.nz/services/meta/v1/search/?page=1&query=" + urllib.urlencode(
-            searchtitle.replace("All New",
+        url = "https://www.choicetv.co.nz/services/meta/v1/search/?page=1&query=" + urllib.quote(
+            searchtitle.replace("all new",
                                 ""))
         headers = {'Content-Type': 'application/json',
                    'Accept': 'application/json',
@@ -496,14 +626,65 @@ class PvrArtwork(object):
         except Exception as exc:
             xbmc.log("Exception in get_data --> %s" % repr(exc), xbmc.LOGERROR)
 
-        return len(data) == 0
+        log_msg("choice length {}".format(len(data)) + " name: " + urllib.quote(searchtitle))
+        return len(data) != 0
+
+    def lookup_choice(self, searchtitle):
+        searchtitle = str(searchtitle)
+
+        data = []
+        url = "https://www.choicetv.co.nz/services/meta/v1/search/?page=1&query=" + urllib.quote(
+            searchtitle.replace("all new",
+                                ""))
+        headers = {'Content-Type': 'application/json',
+                   'Accept': 'application/json',
+                   'User-agent': 'Mozilla/5.0'}
+
+        try:
+            response = requests.get(url, headers=headers, timeout=20)
+            if response and response.content and response.status_code == 200:
+                data = json.loads(response.content.decode('utf-8', 'replace'))
+
+        except Exception as exc:
+            xbmc.log("Exception in get_data --> %s" % repr(exc), xbmc.LOGERROR)
+
+        log_msg("choice length {}".format(len(data)) + " name: " + urllib.quote(searchtitle))
+
+        slug = str(data[0])
+        url = ""
+        if slug.startswith("/tv"):
+            url = "https://www.choicetv.co.nz/services/meta/v2/tv/season/show_multiple?items=" + slug
+            data = {}
+        else:
+            url = "https://www.choicetv.co.nz/services/meta/v2/film/" + slug.replace("/film/", "") + ",/show_multiple"
+            data = []
+        headers = {'Content-Type': 'application/json',
+                   'Accept': 'application/json',
+                   'User-agent': 'Mozilla/5.0'}
+        try:
+            response = requests.get(url, headers=headers, timeout=20)
+            if response and response.content and response.status_code == 200:
+                data = json.loads(response.content.decode('utf-8', 'replace'))
+
+        except Exception as exc:
+            xbmc.log("Exception in get_data --> %s" % repr(exc), xbmc.LOGERROR)
+
+        art = {}
+        if slug.startswith("/tv"):
+            art['fanart'] = data['seasons'][0]['image_urls']['landscape']
+            art['thumb'] = data['seasons'][0]['image_urls']['landscape']
+        else:
+            art['fanart'] = data[0]['image_urls']['landscape']
+            art['thumb'] = data[0]['image_urls']['landscape']
+
+        return art
 
     def check_hgtv(self, searchtitle):
         searchtitle = str(searchtitle)
 
         data = []
-        url = "https://www.hgtv.co.nz/services/meta/v1/search/?page=1&query=" + urllib.urlencode(
-            searchtitle.replace("All New",
+        url = "https://www.hgtv.co.nz/services/meta/v1/search/?page=1&query=" + urllib.quote(
+            searchtitle.replace("all new",
                                 ""))
         headers = {'Content-Type': 'application/json',
                    'Accept': 'application/json',
@@ -517,15 +698,16 @@ class PvrArtwork(object):
         except Exception as exc:
             xbmc.log("Exception in get_data --> %s" % repr(exc), xbmc.LOGERROR)
 
-        return len(data) == 0
+        log_msg("hgtv length {}".format(len(data)) + " name: " + urllib.quote(searchtitle))
+        return len(data) != 0
 
-    def lookup_tvnz(self, searchtitle, manual_select=False):
-        '''helper to select a match on tvnz'''
-
+    def lookup_hgtv(self, searchtitle):
         searchtitle = str(searchtitle)
 
         data = []
-        url = "https://api.tvnz.co.nz/api/content/tvnz/ondemand/shows/search/" + searchtitle.replace("All New", "") + ".androidtablet.v8.json"
+        url = "https://www.hgtv.co.nz/services/meta/v1/search/?page=1&query=" + urllib.quote(
+            searchtitle.replace("all new",
+                                ""))
         headers = {'Content-Type': 'application/json',
                    'Accept': 'application/json',
                    'User-agent': 'Mozilla/5.0'}
@@ -538,65 +720,36 @@ class PvrArtwork(object):
         except Exception as exc:
             xbmc.log("Exception in get_data --> %s" % repr(exc), xbmc.LOGERROR)
 
-        tvdb_match = None
-        searchtitle = searchtitle.lower()
-        tvdb_result = self._mutils.thetvdb.search_series(searchtitle, True)
-        searchchannel = channel.lower().split("hd")[0].replace(" ", "")
-        match_results = []
-        if tvdb_result:
-            for item in tvdb_result:
-                item["score"] = 0
-                if not item["seriesName"]:
-                    continue  # seriesname can be None in some conditions
-                itemtitle = item["seriesName"].lower()
-                network = item["network"].lower().replace(" ", "")
-                # high score if channel name matches
-                if network in searchchannel or searchchannel in network:
-                    item["score"] += 800
-                # exact match on title - very high score
-                if searchtitle == itemtitle:
-                    item["score"] += 1000
-                # match title by replacing some characters
-                if re.sub('\*|,|.\"|\'| |:|;', '', searchtitle) == re.sub('\*|,|.\"|\'| |:|;', '', itemtitle):
-                    item["score"] += 750
-                # add SequenceMatcher score to the results
-                stringmatchscore = SM(None, searchtitle, itemtitle).ratio()
-                if stringmatchscore > 0.7:
-                    item["score"] += stringmatchscore * 500
-                # prefer items with native language as we've searched with localized info enabled
-                if item["overview"]:
-                    item["score"] += 250
-                # prefer items with artwork
-                if item["banner"]:
-                    item["score"] += 1
-                if item["score"] > 500 or manual_select:
-                    match_results.append(item)
-            # sort our new list by score
-            match_results = sorted(match_results, key=itemgetter("score"), reverse=True)
-            if match_results and manual_select:
-                # show selectdialog to manually select the item
-                listitems = []
-                for item in match_results:
-                    thumb = "http://thetvdb.com/banners/%s" % item["banner"] if item["banner"] else ""
-                    listitem = xbmcgui.ListItem(label=item["seriesName"], iconImage=thumb, label2=item["overview"])
-                    listitems.append(listitem)
-                dialog = DialogSelect(
-                    "DialogSelect.xml",
-                    "",
-                    listing=listitems,
-                    window_title="%s - TVDB" %
-                                 xbmc.getLocalizedString(283))
-                dialog.doModal()
-                selected_item = dialog.result
-                del dialog
-                if selected_item != -1:
-                    tvdb_match = match_results[selected_item]["id"]
-                else:
-                    match_results = []
-            if not tvdb_match and match_results:
-                # just grab the first item as best match
-                tvdb_match = match_results[0]["id"]
-        return tvdb_match
+        log_msg("choice length {}".format(len(data)) + " name: " + urllib.quote(searchtitle))
+
+        slug = str(data[0])
+        url = ""
+        if slug.startswith("/tv"):
+            url = "https://www.hgtv.co.nz/services/meta/v2/tv/season/show_multiple?items=" + slug
+            data = {}
+        else:
+            url = "https://www.hgtv.co.nz/services/meta/v2/film/" + slug.replace("/film/", "") + ",/show_multiple"
+            data = []
+        headers = {'Content-Type': 'application/json',
+                   'Accept': 'application/json',
+                   'User-agent': 'Mozilla/5.0'}
+        try:
+            response = requests.get(url, headers=headers, timeout=20)
+            if response and response.content and response.status_code == 200:
+                data = json.loads(response.content.decode('utf-8', 'replace'))
+
+        except Exception as exc:
+            xbmc.log("Exception in get_data --> %s" % repr(exc), xbmc.LOGERROR)
+
+        art = {}
+        if slug.startswith("/tv"):
+            art['fanart'] = data['seasons'][0]['image_urls']['landscape']
+            art['thumb'] = data['seasons'][0]['image_urls']['landscape']
+        else:
+            art['fanart'] = data[0]['image_urls']['landscape']
+            art['thumb'] = data[0]['image_urls']['landscape']
+
+        return art
 
     def get_custom_path(self, searchtitle, title):
         '''locate custom folder on disk as pvrart location'''
